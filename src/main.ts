@@ -1,10 +1,10 @@
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { ChronosModal } from "./modal";
-import { ChronosView, VIEW_TYPE_CHRONOS } from "./chronoview";
+import { ChronosView, VIEW_TYPE_EXAMPLE } from "./chronoview";
 
 export default class Chronos extends Plugin {
 	async onload() {
-		this.registerView(VIEW_TYPE_CHRONOS, (leaf) => new ChronosView(leaf));
+		this.registerView(VIEW_TYPE_EXAMPLE, (leaf) => new ChronosView(leaf));
 
 		new Notice("Chronos loaded!");
 
@@ -27,7 +27,7 @@ export default class Chronos extends Plugin {
 		const { workspace } = this.app;
 
 		let leaf: WorkspaceLeaf | null = null;
-		const leaves = workspace.getLeavesOfType(VIEW_TYPE_CHRONOS);
+		const leaves = workspace.getLeavesOfType(VIEW_TYPE_EXAMPLE);
 
 		if (leaves.length > 0) {
 			// A leaf with our view already exists, use that
@@ -35,9 +35,9 @@ export default class Chronos extends Plugin {
 		} else {
 			// Our view could not be found in the workspace, create a new leaf
 			// in the right sidebar for it
-			leaf = workspace.getRightLeaf(true);
+			leaf = workspace.getLeaf(true);
 			// leaf = workspace.getLeaf(true);
-			await leaf.setViewState({ type: VIEW_TYPE_CHRONOS, active: true });
+			await leaf.setViewState({ type: VIEW_TYPE_EXAMPLE, active: true });
 		}
 		// "Reveal" the leaf in case it is in a collapsed sidebar
 		// make new window beforehand:

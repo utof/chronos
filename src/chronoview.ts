@@ -1,27 +1,34 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 
-export const VIEW_TYPE_CHRONOS = "chronos-view";
+import Component from "./SvelteChronoView.svelte";
+
+export const VIEW_TYPE_EXAMPLE = "example-view";
 
 export class ChronosView extends ItemView {
+	component: Component;
+
 	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
 	}
 
 	getViewType() {
-		return VIEW_TYPE_CHRONOS;
+		return VIEW_TYPE_EXAMPLE;
 	}
 
 	getDisplayText() {
-		return "Chronological view";
+		return "Example view";
 	}
 
 	async onOpen() {
-		const container = this.containerEl.children[1];
-		container.empty();
-		container.createEl("h4", { text: "Chronooooooo" });
+		this.component = new Component({
+			target: this.contentEl,
+			props: {
+				variable: 1,
+			},
+		});
 	}
 
 	async onClose() {
-		// Nothing to clean up.
+		this.component.$destroy();
 	}
 }
