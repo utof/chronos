@@ -1,12 +1,22 @@
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { ChronosModal } from "./modal";
 import { ChronosView, VIEW_TYPE_EXAMPLE } from "./chronoview";
+import { fileStore } from "./stores";
 
 export default class Chronos extends Plugin {
 	async onload() {
 		this.registerView(VIEW_TYPE_EXAMPLE, (leaf) => new ChronosView(leaf));
 
 		new Notice("Chronos loaded!");
+
+		["create", "modify", "delete", "rename"].forEach((event) => {
+			this.registerEvent(
+				(this.app.vault as any).on(
+					event,
+					this.writeVaultFilesToStore.bind(this)
+				)
+			);
+		}); //TG i wonder what bind is
 
 		this.addRibbonIcon("clock", "Chronos", () => {
 			// Creating a function that will display all the notes in chronological order as a modal
@@ -21,6 +31,11 @@ export default class Chronos extends Plugin {
 	// How do i know when to write New and when not? A: This will come with experience, but generally, if you are working with a class, you will need to use the new keyword.
 	async onunload() {
 		new Notice("Chronos unloaded");
+	}
+
+	writeVaultFilesToStore() {
+		const files = this.app.vault.getMarkdownFiles(); // maybe get all files instead?
+		fileStore.set(files);
 	}
 
 	async activateView() {

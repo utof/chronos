@@ -1,3 +1,4 @@
+<!-- SvelteChronoView.svelte -->
 <script lang="ts">
     export let variable: number;
 </script>
