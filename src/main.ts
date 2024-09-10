@@ -7,7 +7,7 @@ export default class Chronos extends Plugin {
 	async onload() {
 		this.registerView(VIEW_TYPE_EXAMPLE, (leaf) => new ChronosView(leaf));
 
-		new Notice("Chronos loaded!");
+		new Notice("Chronos loaded!"); //DEV
 
 		["create", "modify", "delete", "rename"].forEach((event) => {
 			this.registerEvent(
@@ -23,6 +23,8 @@ export default class Chronos extends Plugin {
 
 			new Notice("This is a notice!");
 			this.activateView();
+			this.writeVaultFilesToStore();
+
 			// const modal = new ChronosModal(this.app).open();
 		});
 	}

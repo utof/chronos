@@ -6,3 +6,4 @@
 
 -   TG: to google
 -   RF: to refactor
+-   DEV: something that is only better be in dev stage only
