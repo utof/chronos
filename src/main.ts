@@ -1,3 +1,4 @@
+// main.ts
 import { Notice, Plugin, WorkspaceLeaf } from "obsidian";
 import { ChronosModal } from "./modal";
 import { ChronosView, VIEW_TYPE_EXAMPLE } from "./chronoview";
@@ -37,6 +38,7 @@ export default class Chronos extends Plugin {
 
 	writeVaultFilesToStore() {
 		const files = this.app.vault.getMarkdownFiles(); // maybe get all files instead?
+		files.sort((a, b) => a.stat.mtime - b.stat.mtime);
 		fileStore.set(files);
 	}
 

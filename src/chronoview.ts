@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf } from "obsidian";
+import { ItemView, MarkdownView, WorkspaceLeaf } from "obsidian";
 
 import Component from "./SvelteChronoView.svelte";
 
@@ -24,6 +24,7 @@ export class ChronosView extends ItemView {
 			target: this.contentEl,
 			props: {
 				variable: 1,
+				app: this.app,
 			},
 		});
 	}

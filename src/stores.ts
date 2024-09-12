@@ -1,3 +1,4 @@
+// stores.ts
 import { TFile } from "obsidian";
 import { writable } from "svelte/store";
 
