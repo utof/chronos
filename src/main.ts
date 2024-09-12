@@ -23,8 +23,8 @@ export default class Chronos extends Plugin {
 			// Creating a function that will display all the notes in chronological order as a modal
 
 			new Notice("This is a notice!");
-			this.activateView();
 			this.writeVaultFilesToStore();
+			this.activateView();
 
 			// const modal = new ChronosModal(this.app).open();
 		});
