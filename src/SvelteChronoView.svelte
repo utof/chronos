@@ -1,56 +1,90 @@
 <script lang="ts">
-    import { fileStore } from "./stores";
-    import { onMount, tick } from "svelte";
-    import { Component, MarkdownRenderer } from "obsidian";
+    import { onMount, onDestroy } from "svelte";
+    import { TFile, MarkdownView } from "obsidian";
+    import { fileStore } from "./stores"; // Store for managing files
 
-    export let app;
-    let markdownFiles = [];
-    let contentEls: HTMLElement[] = []; // Store the content elements for each markdown file
-    let component: Component;
+    export let app; // Obsidian app instance
+    let markdownFiles: TFile[] = [];
+    let currentFile: TFile;
+    let activeView: MarkdownView;
+    let editorContainer: HTMLElement;
 
     onMount(() => {
-        component = new Component();
         markdownFiles = $fileStore;
-        renderMarkdownForEachFile();
+        if (markdownFiles.length > 0) {
+            currentFile = markdownFiles[0]; // Load the first file
+            openEditor(currentFile); // Open editor for the file
+        }
     });
 
-    // Function to render markdown for each file individually
-    async function renderMarkdownForEachFile() {
-        await tick(); // Wait for DOM updates to finish
-        if (markdownFiles.length > 0 && contentEls.length > 0) {
-            for (let i = 0; i < markdownFiles.length; i++) {
-                const file = markdownFiles[i];
-                const contentEl = contentEls[i]; // Get the bound content element
-                if (contentEl) {
-                    const markdownContent = await app.vault.cachedRead(file); // Read the file content
-                    await MarkdownRenderer.render(app, markdownContent, contentEl, file.path, component); // Render the markdown
-                }
+    onDestroy(() => {
+        if (activeView) {
+            activeView.clear(); // Clear the view on destroy
+        }
+    });
+
+    // Function to open the editor using MarkdownView
+    function openEditor(file: TFile) {
+        if (file) {
+            // Create a new markdown view inside the editorContainer
+            activeView = app.workspace.getActiveViewOfType(MarkdownView);
+            if (activeView) {
+                app.workspace.detachLeavesOfType("markdown");
+                const leaf = app.workspace.getLeaf(false);
+                leaf.setViewState({
+                    type: "markdown",
+                    state: { file: file.path },
+                }).then(() => {
+                    const view = leaf.view as MarkdownView;
+                    // Bind the view's container to the editorContainer
+                    editorContainer.appendChild(view.contentEl);
+                    app.vault.cachedRead(file).then(content => {
+                        view.editor.setValue(content); // Load the content into the active editor
+                    });
+                });
             }
+        }
+    }
+
+    // Function to save content
+    async function saveFile() {
+        if (activeView && currentFile) {
+            const updatedContent = activeView.editor.getValue(); // Get the edited content
+            await app.vault.modify(currentFile, updatedContent); // Save content back to the vault
+        }
+    }
+
+    // Example of getting selected text
+    function getSelectedText() {
+        if (activeView) {
+            const selectedText = activeView.editor.getSelection(); // Get selected text
+            console.log('Selected text:', selectedText);
+        }
+    }
+
+    // Example of managing scroll
+    function scrollToTop() {
+        if (activeView) {
+            activeView.editor.scrollTo(0, 0); // Scroll to top
         }
     }
 </script>
 
 <style>
-    .card {
+    .editor-container {
         border: 1px solid #ccc;
-        border-radius: 8px;
-        margin: 10px 0;
         padding: 10px;
-        width: 80%;
-        background-color: #fff;
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-        margin-left: auto;
-        margin-right: auto;
-    }
-
-    .card-content {
-        /* white-space: pre-wrap; */
+        width: 100%;
+        min-height: 300px;
+        /* background-color: #fff; */
+        margin: 10px 0;
     }
 </style>
 
-{#each markdownFiles as file, i}
-    <div class="card">
-        <h3>{file.name}</h3>
-        <div class="card-content" bind:this={contentEls[i]}></div> <!-- Bind each card content to the array -->
-    </div>
-{/each}
+<div>
+    <h3>Edit: {currentFile?.name}</h3>
+    <div bind:this={editorContainer} class="editor-container"></div>
+    <button on:click={saveFile}>Save</button>
+    <button on:click={getSelectedText}>Get Selected Text</button>
+    <button on:click={scrollToTop}>Scroll to Top</button>
+</div>
