@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
     import { TFile, MarkdownView } from "obsidian";
-    import { fileStore } from "./stores"; // Store for managing files
+    import { fileStore } from "./stores";
 
     export let app; // Obsidian app instance
     let markdownFiles: TFile[] = [];
@@ -9,34 +9,10 @@
     let activeView: MarkdownView;
     let editorContainer: HTMLElement;
 
-    onMount(() => {
-    markdownFiles = $fileStore;
-    if (markdownFiles.length > 0) {
-        currentFile = markdownFiles[0]; // Load the first file
-        openEditor(currentFile); // Open editor for the file
-    }
-
-    // Hide the inline-title element once it's rendered
-    const observer = new MutationObserver(() => {
-        const inlineTitle = editorContainer.querySelector('.inline-title');
-        if (inlineTitle) {
-            (inlineTitle as HTMLElement).style.display = 'none'; // Hide the inline title
-        }
-    });
-
-    // Observe for any changes in the editorContainer's children
-    observer.observe(editorContainer, { childList: true, subtree: true });
-});
-
-    onDestroy(() => {
-        if (activeView) {
-            activeView.clear(); // Clear the view on destroy
-        }
-    });
-
-    // Function to open the editor using MarkdownView
+    // Open a markdown file and render it in the editor
     async function openEditor(file: TFile) {
-    if (file) {
+        if (!file) return;
+        
         app.workspace.detachLeavesOfType("markdown");
         const leaf = app.workspace.getLeaf(false);
         await leaf.setViewState({
@@ -46,66 +22,96 @@
 
         const view = leaf.view as MarkdownView;
         if (view) {
-            // Apply height and layout styles to the editor container
-            editorContainer.style.height = "100%";
-            editorContainer.style.display = "flex";
-            editorContainer.style.flexDirection = "column";
-
-            // Append the actual Obsidian content to the container
-            editorContainer.appendChild(view.contentEl);
-            
-            // Add more styling to the contentEl to ensure full height
-            view.contentEl.style.flexGrow = "1";
-            view.contentEl.style.height = "100%";
-            view.contentEl.style.overflow = "auto";
-            // overflow x hidden
-            view.contentEl.style.overflowX = "hidden";
-
-            const content = await app.vault.cachedRead(file);
-            view.editor.setValue(content); // Load the content into the active editor
+            setupEditorView(view, file);
         }
     }
+
+    // Setup the editor view and apply styling
+    function setupEditorView(view: MarkdownView, file: TFile) {
+        editorContainer.style.cssText = `
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        `;
+
+        view.contentEl.style.cssText = `
+            flex-grow: 1;
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+        `;
+
+        editorContainer.appendChild(view.contentEl);
+        loadFileContent(view, file);
+        hideInlineTitleOnRender();
+        activeView = view;
+    }
+
+    // Load file content into the editor
+    async function loadFileContent(view: MarkdownView, file: TFile) {
+        const content = await app.vault.cachedRead(file);
+        view.editor.setValue(content);
+    }
+
+    // Hide inline-title once it's rendered
+    function hideInlineTitleOnRender() {
+    const observer = new MutationObserver(() => {
+        const inlineTitle = editorContainer.querySelector('.inline-title');
+        if (inlineTitle && inlineTitle instanceof HTMLElement) {
+            inlineTitle.style.display = 'none'; // Cast Element to HTMLElement
+        }
+    });
+
+    observer.observe(editorContainer, { childList: true, subtree: true });
 }
 
-
-    // Function to save content
+    // Save the current file's content
     async function saveFile() {
         if (activeView && currentFile) {
-            const updatedContent = activeView.editor.getValue(); // Get the edited content
-            await app.vault.modify(currentFile, updatedContent); // Save content back to the vault
+            const updatedContent = activeView.editor.getValue();
+            await app.vault.modify(currentFile, updatedContent);
         }
     }
 
-    // Example of getting selected text
+    // Get selected text from the editor
     function getSelectedText() {
         if (activeView) {
-            const selectedText = activeView.editor.getSelection(); // Get selected text
+            const selectedText = activeView.editor.getSelection();
             console.log('Selected text:', selectedText);
         }
     }
 
-    // Example of managing scroll
+    // Scroll editor to the top
     function scrollToTop() {
-        if (activeView) {
-            activeView.editor.scrollTo(0, 0); // Scroll to top
-        }
+        activeView?.editor.scrollTo(0, 0);
     }
+
+    onMount(() => {
+        markdownFiles = $fileStore;
+        if (markdownFiles.length > 0) {
+            currentFile = markdownFiles[0];
+            openEditor(currentFile);
+        }
+    });
+
+    onDestroy(() => {
+        activeView?.clear();
+    });
 </script>
 
 <style>
-.editor-container {
-    border: 1px solid #ccc;
-    padding: 10px;
-    width: 100%;
-    height: 100%; /* Fill the parent */
-    min-height: 300px;
-    max-height: 500px; /* You can adjust this if needed */
-    display: flex;
-    flex-direction: column;
-    overflow: hidden; /* Prevent extra scrollbars */
-    box-sizing: border-box;
-}
-
+    .editor-container {
+        border: 1px solid #ccc;
+        padding: 10px;
+        width: 100%;
+        height: 100%;
+        min-height: 300px;
+        max-height: 500px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        box-sizing: border-box;
+    }
 </style>
 
 <div>
