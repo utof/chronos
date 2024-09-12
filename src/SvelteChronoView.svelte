@@ -25,27 +25,34 @@
 
     // Function to open the editor using MarkdownView
     function openEditor(file: TFile) {
-        if (file) {
-            // Create a new markdown view inside the editorContainer
-            activeView = app.workspace.getActiveViewOfType(MarkdownView);
-            if (activeView) {
-                app.workspace.detachLeavesOfType("markdown");
-                const leaf = app.workspace.getLeaf(false);
-                leaf.setViewState({
-                    type: "markdown",
-                    state: { file: file.path },
-                }).then(() => {
-                    const view = leaf.view as MarkdownView;
-                    // Bind the view's container to the editorContainer
-                    editorContainer.appendChild(view.contentEl);
-                    app.vault.cachedRead(file).then(content => {
-                        view.editor.setValue(content); // Load the content into the active editor
-                    });
-                });
-            }
-        }
-    }
+    if (file) {
+        console.log("Opening editor for file: ", file.name);
+        
+        app.workspace.detachLeavesOfType("markdown");
+        const leaf = app.workspace.getLeaf(false);
+        console.log("Leaf created: ", leaf);
 
+        leaf.setViewState({
+            type: "markdown",
+            state: { file: file.path },
+        }).then(() => {
+            const view = leaf.view as MarkdownView;
+            if (view) {
+                console.log("View created: ", view);
+                // Bind the view's container to the editorContainer
+                editorContainer.appendChild(view.contentEl);
+                app.vault.cachedRead(file).then(content => {
+                    view.editor.setValue(content); // Load the content into the active editor
+                    console.log("Editor content set");
+                }).catch(err => console.error("Failed to read file content: ", err));
+            } else {
+                console.error("MarkdownView was not created.");
+            }
+        }).catch(err => console.error("Failed to set view state: ", err));
+    } else {
+        console.error("File is not defined");
+    }
+}
     // Function to save content
     async function saveFile() {
         if (activeView && currentFile) {
