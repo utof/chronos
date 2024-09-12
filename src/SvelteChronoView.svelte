@@ -10,12 +10,23 @@
     let editorContainer: HTMLElement;
 
     onMount(() => {
-        markdownFiles = $fileStore;
-        if (markdownFiles.length > 0) {
-            currentFile = markdownFiles[0]; // Load the first file
-            openEditor(currentFile); // Open editor for the file
+    markdownFiles = $fileStore;
+    if (markdownFiles.length > 0) {
+        currentFile = markdownFiles[0]; // Load the first file
+        openEditor(currentFile); // Open editor for the file
+    }
+
+    // Hide the inline-title element once it's rendered
+    const observer = new MutationObserver(() => {
+        const inlineTitle = editorContainer.querySelector('.inline-title');
+        if (inlineTitle) {
+            (inlineTitle as HTMLElement).style.display = 'none'; // Hide the inline title
         }
     });
+
+    // Observe for any changes in the editorContainer's children
+    observer.observe(editorContainer, { childList: true, subtree: true });
+});
 
     onDestroy(() => {
         if (activeView) {
@@ -24,35 +35,39 @@
     });
 
     // Function to open the editor using MarkdownView
-    function openEditor(file: TFile) {
+    async function openEditor(file: TFile) {
     if (file) {
-        console.log("Opening editor for file: ", file.name);
-        
         app.workspace.detachLeavesOfType("markdown");
         const leaf = app.workspace.getLeaf(false);
-        console.log("Leaf created: ", leaf);
-
-        leaf.setViewState({
+        await leaf.setViewState({
             type: "markdown",
             state: { file: file.path },
-        }).then(() => {
-            const view = leaf.view as MarkdownView;
-            if (view) {
-                console.log("View created: ", view);
-                // Bind the view's container to the editorContainer
-                editorContainer.appendChild(view.contentEl);
-                app.vault.cachedRead(file).then(content => {
-                    view.editor.setValue(content); // Load the content into the active editor
-                    console.log("Editor content set");
-                }).catch(err => console.error("Failed to read file content: ", err));
-            } else {
-                console.error("MarkdownView was not created.");
-            }
-        }).catch(err => console.error("Failed to set view state: ", err));
-    } else {
-        console.error("File is not defined");
+        });
+
+        const view = leaf.view as MarkdownView;
+        if (view) {
+            // Apply height and layout styles to the editor container
+            editorContainer.style.height = "100%";
+            editorContainer.style.display = "flex";
+            editorContainer.style.flexDirection = "column";
+
+            // Append the actual Obsidian content to the container
+            editorContainer.appendChild(view.contentEl);
+            
+            // Add more styling to the contentEl to ensure full height
+            view.contentEl.style.flexGrow = "1";
+            view.contentEl.style.height = "100%";
+            view.contentEl.style.overflow = "auto";
+            // overflow x hidden
+            view.contentEl.style.overflowX = "hidden";
+
+            const content = await app.vault.cachedRead(file);
+            view.editor.setValue(content); // Load the content into the active editor
+        }
     }
 }
+
+
     // Function to save content
     async function saveFile() {
         if (activeView && currentFile) {
@@ -78,14 +93,19 @@
 </script>
 
 <style>
-    .editor-container {
-        border: 1px solid #ccc;
-        padding: 10px;
-        width: 100%;
-        min-height: 300px;
-        /* background-color: #fff; */
-        margin: 10px 0;
-    }
+.editor-container {
+    border: 1px solid #ccc;
+    padding: 10px;
+    width: 100%;
+    height: 100%; /* Fill the parent */
+    min-height: 300px;
+    max-height: 500px; /* You can adjust this if needed */
+    display: flex;
+    flex-direction: column;
+    overflow: hidden; /* Prevent extra scrollbars */
+    box-sizing: border-box;
+}
+
 </style>
 
 <div>
