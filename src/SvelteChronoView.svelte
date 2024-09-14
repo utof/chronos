@@ -1,123 +1,47 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
-    import { TFile, MarkdownView } from "obsidian";
+    import { TFile } from "obsidian";
     import { fileStore } from "./stores";
+    import NoteItem from "./NoteItem.svelte";
 
     export let app; // Obsidian app instance
-    let markdownFiles: TFile[] = [];
-    let currentFile: TFile;
-    let activeView: MarkdownView;
-    let editorContainer: HTMLElement;
 
-    // Open a markdown file and render it in the editor
-    async function openEditor(file: TFile) {
-        if (!file) return;
-        
-        app.workspace.detachLeavesOfType("markdown");
-        const leaf = app.workspace.getLeaf(false);
-        await leaf.setViewState({
-            type: "markdown",
-            state: { file: file.path },
-        });
+    let noteStates = [];
 
-        const view = leaf.view as MarkdownView;
-        if (view) {
-            setupEditorView(view, file);
-        }
-    }
-
-    // Setup the editor view and apply styling
-    function setupEditorView(view: MarkdownView, file: TFile) {
-        editorContainer.style.cssText = `
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-        `;
-
-        view.contentEl.style.cssText = `
-            flex-grow: 1;
-            height: 100%;
-            overflow-y: auto;
-            overflow-x: hidden;
-        `;
-
-        editorContainer.appendChild(view.contentEl);
-        loadFileContent(view, file);
-        hideInlineTitleOnRender();
-        activeView = view;
-    }
-
-    // Load file content into the editor
-    async function loadFileContent(view: MarkdownView, file: TFile) {
-        const content = await app.vault.cachedRead(file);
-        view.editor.setValue(content);
-    }
-
-    // Hide inline-title once it's rendered
-    function hideInlineTitleOnRender() {
-    const observer = new MutationObserver(() => {
-        const inlineTitle = editorContainer.querySelector('.inline-title');
-        if (inlineTitle && inlineTitle instanceof HTMLElement) {
-            inlineTitle.style.display = 'none'; // Cast Element to HTMLElement
-        }
-    });
-
-    observer.observe(editorContainer, { childList: true, subtree: true });
-}
-
-    // Save the current file's content
-    async function saveFile() {
-        if (activeView && currentFile) {
-            const updatedContent = activeView.editor.getValue();
-            await app.vault.modify(currentFile, updatedContent);
-        }
-    }
-
-    // Get selected text from the editor
-    function getSelectedText() {
-        if (activeView) {
-            const selectedText = activeView.editor.getSelection();
-            console.log('Selected text:', selectedText);
-        }
-    }
-
-    // Scroll editor to the top
-    function scrollToTop() {
-        activeView?.editor.scrollTo(0, 0);
-    }
+    let unsubscribe;
 
     onMount(() => {
-        markdownFiles = $fileStore;
-        if (markdownFiles.length > 0) {
-            currentFile = markdownFiles[0];
-            openEditor(currentFile);
-        }
+        // Subscribe to fileStore changes
+        unsubscribe = fileStore.subscribe((files) => {
+            loadNotes(files);
+        });
     });
 
     onDestroy(() => {
-        activeView?.clear();
+        if (unsubscribe) unsubscribe();
     });
+
+    async function loadNotes(files: TFile[]) {
+        console.log("Loading notes:", files);
+        const newNoteStates = [];
+        for (let file of files) {
+            const content = await app.vault.cachedRead(file);
+            newNoteStates.push({
+                file,
+                content,
+                isEditing: false,
+                container: null,
+            });
+        }
+        noteStates = newNoteStates; // Reassign to trigger reactivity
+        console.log("Note states:", noteStates);
+    }
 </script>
 
-<style>
-    .editor-container {
-        border: 1px solid #ccc;
-        padding: 10px;
-        width: 100%;
-        height: 100%;
-        min-height: 300px;
-        max-height: 500px;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        box-sizing: border-box;
-    }
-</style>
-
-<div>
-    <h3>Edit: {currentFile?.name}</h3>
-    <div bind:this={editorContainer} class="editor-container"></div>
-    <button on:click={saveFile}>Save</button>
-    <button on:click={getSelectedText}>Get Selected Text</button>
-    <button on:click={scrollToTop}>Scroll to Top</button>
-</div>
+{#if noteStates.length === 0}
+    <p>Loading notes...</p>
+{:else}
+    {#each noteStates as noteState (noteState.file.path)}
+        <NoteItem {noteState} {app} />
+    {/each}
+{/if}

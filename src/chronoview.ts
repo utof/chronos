@@ -1,11 +1,10 @@
-import { ItemView, MarkdownView, WorkspaceLeaf } from "obsidian";
-
-import Component from "./SvelteChronoView.svelte";
-
+// chronoview.ts
+import { ItemView, WorkspaceLeaf } from "obsidian";
+import SvelteChronoView from "./SvelteChronoView.svelte";
 export const VIEW_TYPE_EXAMPLE = "example-view";
 
 export class ChronosView extends ItemView {
-	component: Component;
+	component: SvelteChronoView;
 
 	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
@@ -16,14 +15,13 @@ export class ChronosView extends ItemView {
 	}
 
 	getDisplayText() {
-		return "Example view";
+		return "Chronos";
 	}
 
 	async onOpen() {
-		this.component = new Component({
+		this.component = new SvelteChronoView({
 			target: this.contentEl,
 			props: {
-				variable: 1,
 				app: this.app,
 			},
 		});
