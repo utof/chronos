@@ -30,7 +30,8 @@ export default class Chronos extends Plugin {
 
 	writeVaultFilesToStore() {
 		const files = this.app.vault.getMarkdownFiles();
-		files.sort((a, b) => a.stat.mtime - b.stat.mtime);
+		// files.sort((a, b) => a.stat.mtime - b.stat.mtime); // invert ordr
+		files.sort((a, b) => b.stat.mtime - a.stat.mtime);
 		fileStore.set(files);
 	}
 
