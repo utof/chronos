@@ -1,3 +1,4 @@
+<!-- SvelteChronoView.svelte -->
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
     import { TFile } from "obsidian";
