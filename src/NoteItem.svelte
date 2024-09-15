@@ -95,9 +95,9 @@
                     // Get tags
                     const tags = getAllTags(cache);
                     let tag = '';
-                    if (tags.has('#folder')) {
+                    if (tags.has('folder')) {
                         tag = '#folder';
-                    } else if (tags.has('#MOC')) {
+                    } else if (tags.has('MOC')) {
                         tag = '#MOC';
                     }
 
@@ -133,7 +133,7 @@
             const cache = app.metadataCache.getFileCache(file);
             const tags = getAllTags(cache);
 
-            if (tags.has('#MOC') || tags.has('#folder')) {
+            if (tags.has('#MOC') || tags.has('#folder') || tags.has('MOC') || tags.has('folder')) {
                 if (query.length === 0 || file.basename.toLowerCase().includes(query.toLowerCase())) {
                     filteredFiles.push(file);
                 }
@@ -155,9 +155,9 @@
             const cache = app.metadataCache.getFileCache(file);
             const tags = getAllTags(cache);
             let tag = '';
-            if (tags.has('#folder')) {
+            if (tags.has('#folder') || tags.has('folder')) {
                 tag = '#folder';
-            } else if (tags.has('#MOC')) {
+            } else if (tags.has('#MOC') || tags.has('MOC')) {
                 tag = '#MOC';
             }
             return {
@@ -270,8 +270,8 @@
     }
 
     async function getBestParentPaths(file: TFile): Promise<[TFile, number][]> {
-        const mocTag = "#MOC";
-        const folderTag = "#folder";
+        const mocTag = "MOC";
+        const folderTag = "folder";
 
         // Get backlinks and outgoing links for the file
         const backlinks = app.metadataCache.getBacklinksForFile(file)?.data || {};
