@@ -16,10 +16,18 @@
     let editorView: EditorView | null = null;
     let parentNotes: { file: TFile, tag: string }[] = [];
     let parentInputEl: HTMLInputElement;
-    let suggestionList: { file: TFile, count: number, tag: string, childCount: number }[] = [];
+    let suggestionList: {
+        file: TFile,
+        tag: string,
+        childCount: number,
+        neighborCount: number
+    }[] = [];
     let showSuggestions = false;
     let query = '';
     let sortOption = 'name';
+
+    // Variables for move functionality
+    let moveError: string = '';
 
     $: if (!noteState.isEditing && containerEl) {
         renderNoteContent();
@@ -39,7 +47,24 @@
             null
         );
     }
-
+    async function moveNoteToParentFolder(parentEntry) {
+        const parentFile = parentEntry.file;
+        const targetFolder = parentFile.parent;
+        if (targetFolder) {
+            const newPath = `${targetFolder.path}/${noteState.file.name}`;
+            try {
+                await app.vault.rename(noteState.file, newPath);
+                noteState.file = app.vault.getAbstractFileByPath(newPath) as TFile;
+                noteState.file.path = newPath;
+                await loadParentNotes();
+                renderNoteContent();
+            } catch (error) {
+                moveError = `Failed to move note: ${error.message}`;
+            }
+        } else {
+            console.error("Parent note has no parent folder.");
+        }
+    }
     function editNote() {
         noteState.isEditing = true;
         containerEl.innerHTML = '';
@@ -141,18 +166,14 @@
             }
         }
 
-        // Get best parent paths with counts
-        const bestParents = await getBestParentPaths(noteState.file);
-
-        // Create a map for quick access to counts
-        const countsMap = new Map<string, number>();
-        bestParents.forEach(([file, count]) => {
-            countsMap.set(file.path, count);
-        });
+        // Get neighbor counts
+        const neighborCounts = await getBestParentPaths(noteState.file);
 
         // Build suggestion list with counts and tags
         suggestionList = filteredFiles.map(file => {
-            const count = countsMap.get(file.path) || 0;
+            const neighborCountEntry = neighborCounts.get(file.path);
+            const neighborCount = neighborCountEntry ? neighborCountEntry[1] : 0;
+
             const cache = app.metadataCache.getFileCache(file);
             const tags = getAllTags(cache);
             let tag = '';
@@ -166,19 +187,10 @@
             let childCount = 0;
 
             if (tag === '#MOC') {
-                let parentOf = [];
-
-                if (cache?.frontmatter?.parent_of) {
-                    parentOf = cache.frontmatter.parent_of;
-                    if (typeof parentOf === 'string') {
-                        parentOf = [parentOf];
-                    }
-                    childCount = parentOf.length;
-                }
+                childCount = getMOCChildCount(file);
             }
 
             if (tag === '#folder') {
-                // Get the folder path
                 const folderPath = file.parent.path;
                 const folder = app.vault.getAbstractFileByPath(folderPath);
                 if (folder && folder instanceof TFolder) {
@@ -188,9 +200,9 @@
 
             return {
                 file,
-                count,
                 tag,
-                childCount
+                childCount,
+                neighborCount
             };
         });
 
@@ -205,27 +217,14 @@
                 return b.file.stat.mtime - a.file.stat.mtime;
             } else if (sortOption === 'childCount') {
                 return b.childCount - a.childCount;
+            } else if (sortOption === 'neighborCount') {
+                return b.neighborCount - a.neighborCount;
             } else {
-                // Default sorting
                 return a.file.basename.localeCompare(b.file.basename);
             }
         });
 
         showSuggestions = true;
-    }
-
-    function getFolderChildCount(folder: TFolder): number {
-        let count = 0;
-
-        for (const child of folder.children) {
-            if (child instanceof TFile || child instanceof TFolder) {
-                count++;
-            }
-            if (child instanceof TFolder) {
-                count += getFolderChildCount(child);
-            }
-        }
-        return count;
     }
 
     function getAllTags(cache) {
@@ -304,141 +303,98 @@
         });
     }
 
-    async function getBestParentPaths(file: TFile): Promise<[TFile, number][]> {
-        const mocTag = "MOC";
-        const folderTag = "folder";
+    async function getBestParentPaths(note: TFile): Promise<Map<string, [TFile, number]>> {
+        const mocTag = 'MOC';
+        const folderTag = 'folder';
 
-        // Get backlinks and outgoing links for the file
-        const backlinks = app.metadataCache.getBacklinksForFile(file)?.data || {};
-        const outgoingLinks = app.metadataCache.resolvedLinks[file.path] || {};
+        // Step 1: Get links and backlinks of the current note
+        const links = app.metadataCache.resolvedLinks[note.path] || {};
+        const backlinks = app.metadataCache.getBacklinksForFile(note)?.data || {};
 
-        // Create a set to store unique linked files
-        const linkedFiles = new Set<TFile>();
-        for (let linkPath in backlinks) {
-            const linkedFile = app.metadataCache.getFirstLinkpathDest(
-                linkPath,
-                file.path
-            );
-            if (linkedFile) {
-                linkedFiles.add(linkedFile);
-            }
+        // Combine links and backlinks into a set of neighbor paths
+        const neighborPaths = new Set<string>();
+
+        for (let path in links) {
+            neighborPaths.add(path);
         }
-        for (let linkPath in outgoingLinks) {
-            const linkedFile = app.metadataCache.getFirstLinkpathDest(
-                linkPath,
-                file.path
-            );
-            if (linkedFile) {
-                linkedFiles.add(linkedFile);
-            }
+        for (let path in backlinks) {
+            neighborPaths.add(path);
         }
+        // Exclude the current note
+        neighborPaths.delete(note.path);
 
-        // Create a map to count occurrences of parent MOCs/folders
-        const parentCounts: Map<string, [TFile, number]> = new Map();
+        // Step 2: For each neighbor, get their links and backlinks
+        const mocCounts: Map<string, [TFile, number]> = new Map();
 
-        // To avoid repetition when checking neighbors
-        const processedFiles = new Set<TFile>();
+        for (let neighborPath of neighborPaths) {
+            const neighborFile = app.vault.getAbstractFileByPath(neighborPath) as TFile;
+            if (neighborFile) {
+                const neighborLinks = app.metadataCache.resolvedLinks[neighborPath] || {};
+                const neighborBacklinks = app.metadataCache.getBacklinksForFile(neighborFile)?.data || {};
 
-        // Iterate over linked files and their neighbors
-        for (const linkedFile of linkedFiles) {
-            if (processedFiles.has(linkedFile)) continue;
-            processedFiles.add(linkedFile);
+                // Combine neighbor's links and backlinks
+                const neighborNeighborPaths = new Set<string>();
 
-            const isParent = await isMOCorFolder(linkedFile, mocTag, folderTag);
-            if (isParent) {
-                const existing = parentCounts.get(linkedFile.path);
-                parentCounts.set(
-                    linkedFile.path,
-                    [linkedFile, (existing ? existing[1] : 0) + 1]
-                );
-            }
-
-            // Get neighbors of the linked file
-            const neighborBacklinks = app.metadataCache.getBacklinksForFile(linkedFile)?.data || {};
-            const neighborOutgoingLinks = app.metadataCache.resolvedLinks[linkedFile.path] || {};
-
-            for (let neighborLinkPath in neighborBacklinks) {
-                const neighborFile = app.metadataCache.getFirstLinkpathDest(
-                    neighborLinkPath,
-                    linkedFile.path
-                );
-                if (neighborFile && !processedFiles.has(neighborFile)) {
-                    processedFiles.add(neighborFile);
-
-                    const isNeighborParent = await isMOCorFolder(neighborFile, mocTag, folderTag);
-                    if (isNeighborParent) {
-                        const existing = parentCounts.get(neighborFile.path);
-                        parentCounts.set(
-                            neighborFile.path,
-                            [neighborFile, (existing ? existing[1] : 0) + 1]
-                        );
-                    }
+                for (let path in neighborLinks) {
+                    neighborNeighborPaths.add(path);
                 }
-            }
-            for (let neighborLinkPath in neighborOutgoingLinks) {
-                const neighborFile = app.metadataCache.getFirstLinkpathDest(
-                    neighborLinkPath,
-                    linkedFile.path
-                );
-                if (neighborFile && !processedFiles.has(neighborFile)) {
-                    processedFiles.add(neighborFile);
+                for (let path in neighborBacklinks) {
+                    neighborNeighborPaths.add(path);
+                }
+                // Exclude the neighbor and the current note
+                neighborNeighborPaths.delete(neighborPath);
+                neighborNeighborPaths.delete(note.path);
 
-                    const isNeighborParent = await isMOCorFolder(neighborFile, mocTag, folderTag);
-                    if (isNeighborParent) {
-                        const existing = parentCounts.get(neighborFile.path);
-                        parentCounts.set(
-                            neighborFile.path,
-                            [neighborFile, (existing ? existing[1] : 0) + 1]
-                        );
+                // Step 3: Check which of these links are MOCs or folders
+                for (let path of neighborNeighborPaths) {
+                    const file = app.vault.getAbstractFileByPath(path) as TFile;
+                    if (file) {
+                        const cache = app.metadataCache.getFileCache(file);
+                        const tags = getAllTags(cache);
+                        if (tags.has(mocTag) || tags.has(folderTag)) {
+                            // Increment the count for this MOC/folder
+                            const existing = mocCounts.get(file.path);
+                            if (existing) {
+                                existing[1] += 1;
+                            } else {
+                                mocCounts.set(file.path, [file, 1]);
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Convert map to array
-        const sortedParentFiles = Array.from(parentCounts.values()).sort(
-            (a, b) => b[1] - a[1]
-        );
-
-        return sortedParentFiles;
+        return mocCounts;
     }
 
-    async function isMOCorFolder(file: TFile, mocTag: string, folderTag: string): Promise<boolean> {
-        const cache = app.metadataCache.getFileCache(file);
-        const tags = getAllTags(cache);
+    function getMOCChildCount(mocFile: TFile): number {
+        const cache = app.metadataCache.getFileCache(mocFile);
+        let parentOf = [];
 
-        // Check if the file has either the mocTag or folderTag
-        return tags.has(mocTag) || tags.has(folderTag);
-    }
-
-    // Implement moveNoteToFolder function
-    async function moveNoteToFolder(note: TFile, targetNote: TFile): Promise<void> {
-        const targetFolder = targetNote.parent;
-        if (targetFolder) {
-            const newPath = `${targetFolder.path}/${note.name}`;
-            await app.vault.rename(note, newPath);
-            noteState.file = app.vault.getAbstractFileByPath(newPath) as TFile;
-            noteState.file.path = newPath;
-            await loadParentNotes();
-        } else {
-            console.error("Target note has no parent folder.");
+        if (cache?.frontmatter?.parent_of) {
+            parentOf = cache.frontmatter.parent_of;
+            if (typeof parentOf === 'string') {
+                parentOf = [parentOf];
+            }
+            return parentOf.length;
         }
-    }
-    async function moveNoteToParentFolder(parentEntry) {
-        const parentFile = parentEntry.file;
-        const targetFolder = parentFile.parent;
-        if (targetFolder) {
-            const newPath = `${targetFolder.path}/${noteState.file.name}`;
-            await app.vault.rename(noteState.file, newPath);
-            noteState.file = app.vault.getAbstractFileByPath(newPath) as TFile;
-            noteState.file.path = newPath;
-            await loadParentNotes();
-            renderNoteContent();
-        } else {
-            console.error("Parent note has no parent folder.");
-        }
+        return 0;
     }
 
+    function getFolderChildCount(folder: TFolder): number {
+        let count = 0;
+
+        for (const child of folder.children) {
+            if (child instanceof TFile || child instanceof TFolder) {
+                count++;
+            }
+            if (child instanceof TFolder) {
+                count += getFolderChildCount(child);
+            }
+        }
+        return count;
+    }
 
     onDestroy(() => {
         if (editorView) {
@@ -446,7 +402,6 @@
         }
     });
 </script>
-
 
 <div class="note-container">
     <h3>{noteState.file.name}</h3>
@@ -473,38 +428,42 @@
                 <span class="remove-parent" on:click={() => removeParent(parentEntry)}>×</span>
             </div>
         {/each}
-        <!-- Existing input for adding new parents -->
+        <!-- Input for adding new parents -->
         <input type="text" bind:this={parentInputEl} bind:value={query} on:input={onInput} on:focus={onFocus} on:blur={onBlur} placeholder="Add parent..." />
-        <label>
-            Sort by:
-            <select bind:value={sortOption} on:change={updateSuggestions}>
-                <option value="name">Name</option>
-                <option value="lastUpdated">Last Updated</option>
-                <option value="childCount">Child Count</option>
-            </select>
-        </label>
         {#if showSuggestions}
-        
-        <!-- Suggestions list -->
-        <div class="suggestions">
-            {#each suggestionList as suggestion}
-                <div class="suggestion-item {suggestion.tag === '#folder' ? 'folder' : ''}" on:click={() => selectSuggestion(suggestion)}>
-                    <span>
-                        {suggestion.file.basename} ({suggestion.childCount})
-                        {#if suggestion.count > 0}
-                            {` ${suggestion.count}`}
-                        {/if}
-                        {#if suggestion.tag}
-                            {` ${suggestion.tag}`}
-                        {/if}
-                    </span>
-                </div>
-            {/each}
-        </div>
+            <!-- Sorting options -->
+            <div class="sort-options">
+                <label>
+                    Sort by:
+                    <select bind:value={sortOption} on:change={updateSuggestions}>
+                        <option value="name">Name</option>
+                        <option value="lastUpdated">Last Updated</option>
+                        <option value="childCount">Child Count</option>
+                        <option value="neighborCount">Neighbor Count</option>
+                    </select>
+                </label>
+            </div>
+            <div class="suggestions">
+                {#each suggestionList as suggestion}
+                    <div class="suggestion-item {suggestion.tag === '#folder' ? 'folder' : ''}" on:click={() => selectSuggestion(suggestion)}>
+                        <span>
+                            {suggestion.file.basename} ({suggestion.childCount})
+                            {#if suggestion.neighborCount > 0}
+                                {` Neighbor Count: ${suggestion.neighborCount}`}
+                            {/if}
+                            {#if suggestion.tag}
+                                {` ${suggestion.tag}`}
+                            {/if}
+                        </span>
+                    </div>
+                {/each}
+            </div>
         {/if}
     </div>
+    {#if moveError}
+        <div class="error">{moveError}</div>
+    {/if}
 </div>
-
     <style>
         .suggestion-item.folder {
         background-color: #e6f2ff; /* Slightly blueish background for folders */
