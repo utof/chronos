@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
-    import { TFile, MarkdownRenderer } from "obsidian";
+    import { TFile, TFolder, MarkdownRenderer } from "obsidian";
     import { EditorView, basicSetup } from '@codemirror/basic-setup';
-	import { EditorState } from "@codemirror/state";
+    import { EditorState } from "@codemirror/state";
 
     export let app;
     export let noteState: {
@@ -14,12 +14,16 @@
 
     let containerEl: HTMLElement;
     let editorView: EditorView | null = null;
-    // Updated parentNotes to include tag information
     let parentNotes: { file: TFile, tag: string }[] = [];
     let parentInputEl: HTMLInputElement;
     let suggestionList: { file: TFile, count: number, tag: string }[] = [];
     let showSuggestions = false;
     let query = '';
+
+    // New variables for move functionality
+    let moveTargetInput: HTMLInputElement;
+    let moveTargetPath: string = '';
+    let moveError: string = '';
 
     $: if (!noteState.isEditing && containerEl) {
         renderNoteContent();
@@ -376,6 +380,46 @@
         return tags.has(mocTag) || tags.has(folderTag);
     }
 
+    // Implement moveNoteToFolder function
+    async function moveNoteToFolder(note: TFile, targetNote: TFile): Promise<void> {
+        const targetFolder = targetNote.parent;
+        if (targetFolder) {
+            const newPath = `${targetFolder.path}/${note.name}`;
+            await app.vault.rename(note, newPath);
+            noteState.file = app.vault.getAbstractFileByPath(newPath) as TFile;
+            noteState.file.path = newPath;
+            await loadParentNotes();
+        } else {
+            console.error("Target note has no parent folder.");
+        }
+    }
+    async function moveNoteToParentFolder(parentEntry) {
+        const parentFile = parentEntry.file;
+        const targetFolder = parentFile.parent;
+        if (targetFolder) {
+            const newPath = `${targetFolder.path}/${noteState.file.name}`;
+            await app.vault.rename(noteState.file, newPath);
+            noteState.file = app.vault.getAbstractFileByPath(newPath) as TFile;
+            noteState.file.path = newPath;
+            await loadParentNotes();
+            renderNoteContent();
+        } else {
+            console.error("Parent note has no parent folder.");
+        }
+    }
+
+    async function moveNote() {
+        moveError = '';
+        const targetNote = app.vault.getAbstractFileByPath(moveTargetPath) as TFile;
+        if (targetNote) {
+            await moveNoteToFolder(noteState.file, targetNote);
+            moveTargetPath = '';
+            renderNoteContent();
+        } else {
+            moveError = 'Target note not found.';
+        }
+    }
+
     onDestroy(() => {
         if (editorView) {
             editorView.destroy();
@@ -383,96 +427,6 @@
     });
 </script>
 
-<style>
-    .note-container {
-        border: 1px solid #ccc;
-        padding: 10px;
-        margin-bottom: 20px;
-    }
-
-    .editor-container {
-        width: 100%;
-        min-height: 100px;
-        max-height: 500px;
-        overflow: auto;
-    }
-
-    .button-group {
-        margin-top: 10px;
-    }
-
-    .parent-notes {
-        display: flex;
-        flex-wrap: wrap;
-        margin-top: 10px;
-    }
-
-    .parent-note {
-        background-color: #e0e0e0;
-        color: #333;
-        padding: 5px 10px;
-        margin-right: 5px;
-        margin-bottom: 5px;
-        border-radius: 5px;
-        display: flex;
-        align-items: center;
-    }
-
-    .parent-note.folder {
-        background-color: #e6f2ff; /* Slightly blueish background for folders */
-    }
-
-    .parent-note .remove-parent {
-        margin-left: 8px;
-        cursor: pointer;
-        font-weight: bold;
-    }
-
-    .suggestions {
-        position: absolute;
-        background-color: white;
-        border: 1px solid #ccc;
-        max-height: 150px;
-        overflow-y: auto;
-        z-index: 1000;
-        width: calc(100% - 20px);
-        top: 100%;
-        left: 0;
-    }
-
-    .suggestion-item {
-        padding: 5px 10px;
-        cursor: pointer;
-        display: flex;
-        justify-content: space-between;
-        color: #333;
-    }
-
-    .suggestion-item:hover {
-        background-color: #f0f0f0;
-    }
-
-    .suggestion-item.folder {
-        background-color: #e6f2ff; /* Slightly blueish background for folders */
-    }
-
-    .parent-input-container {
-        position: relative;
-        margin-top: 10px;
-        display: flex;
-        align-items: center;
-        flex-wrap: wrap;
-    }
-
-    .parent-input-container input {
-        flex: 1;
-        min-width: 150px;
-        margin-top: 5px;
-        padding: 5px;
-        border: 1px solid #ccc;
-        border-radius: 4px;
-    }
-</style>
 
 <div class="note-container">
     <h3>{noteState.file.name}</h3>
@@ -487,14 +441,19 @@
             <button on:click={editNote}>Edit</button>
         </div>
     {/if}
-    <!-- Display parent notes and input for adding new parents -->
+
+    <!-- Display parent notes with Move button -->
     <div class="parent-input-container">
         {#each parentNotes as parentEntry}
             <div class="parent-note {parentEntry.tag === '#folder' ? 'folder' : ''}">
+                <button on:click={() => moveNoteToParentFolder(parentEntry)} style="font-size: 0.5em; padding: 1px 2px">
+                    M
+                </button>
                 {parentEntry.file.basename}
                 <span class="remove-parent" on:click={() => removeParent(parentEntry)}>×</span>
             </div>
         {/each}
+        <!-- Existing input for adding new parents -->
         <input type="text" bind:this={parentInputEl} bind:value={query} on:input={onInput} on:focus={onFocus} on:blur={onBlur} placeholder="Add parent..." />
         {#if showSuggestions}
             <div class="suggestions">
@@ -515,3 +474,105 @@
         {/if}
     </div>
 </div>
+
+    <style>
+        .move-note-container {
+        margin-top: 10px;
+        }
+        .move-note-container input {
+            margin-right: 5px;
+            padding: 5px;
+            width: 300px;
+        }
+        .error {
+            color: red;
+        }
+        .note-container {
+            border: 1px solid #ccc;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+    
+        .editor-container {
+            width: 100%;
+            min-height: 100px;
+            max-height: 500px;
+            overflow: auto;
+        }
+    
+        .button-group {
+            margin-top: 10px;
+        }
+    
+        .parent-notes {
+            display: flex;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+    
+        .parent-note {
+            background-color: #e0e0e0;
+            color: #333;
+            padding: 5px 10px;
+            margin-right: 5px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+        }
+    
+        .parent-note.folder {
+            background-color: #e6f2ff; /* Slightly blueish background for folders */
+        }
+    
+        .parent-note .remove-parent {
+            margin-left: 8px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+    
+        .suggestions {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #ccc;
+            max-height: 150px;
+            overflow-y: auto;
+            z-index: 1000;
+            width: calc(100% - 20px);
+            top: 100%;
+            left: 0;
+        }
+    
+        .suggestion-item {
+            padding: 5px 10px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            color: #333;
+        }
+    
+        .suggestion-item:hover {
+            background-color: #f0f0f0;
+        }
+    
+        .suggestion-item.folder {
+            background-color: #e6f2ff; /* Slightly blueish background for folders */
+        }
+    
+        .parent-input-container {
+            position: relative;
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+    
+        .parent-input-container input {
+            flex: 1;
+            min-width: 150px;
+            margin-top: 5px;
+            padding: 5px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+    </style>
