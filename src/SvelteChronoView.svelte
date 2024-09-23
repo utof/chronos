@@ -9,11 +9,12 @@
     let noteStates = [];
     let unsubscribe;
 
-    let allMOCs: TFile[] = [];
-    let allFolders: TFile[] = [];
+    let combinedMOCsAndFolders = [];
 
     let selectedFilterPath: string = '';
-    let filterType: 'all' | 'MOC' | 'folder' = 'all';
+    let filterType: 'all' | 'MOCFolder' = 'all';
+
+    let sortOption = 'name';
 
     onMount(() => {
         // Subscribe to fileStore changes
@@ -34,7 +35,6 @@
     });
 
     async function loadNotes(files: TFile[]) {
-        console.log("Loading notes:", files);
         const newNoteStates = [];
         for (let file of files) {
             const content = await app.vault.cachedRead(file);
@@ -46,26 +46,67 @@
             });
         }
         noteStates = newNoteStates; // Reassign to trigger reactivity
-        console.log("Note states:", noteStates);
     }
 
     function loadAllMOCsAndFolders() {
         const allFiles = app.vault.getMarkdownFiles();
-        allMOCs = [];
-        allFolders = [];
+        combinedMOCsAndFolders = [];
 
         for (const file of allFiles) {
             const cache = app.metadataCache.getFileCache(file);
             const tags = getAllTags(cache);
 
-            if (tags.has('#MOC') || tags.has('MOC')) {
-                allMOCs.push(file);
-            }
+            let isMOC = tags.has('#MOC') || tags.has('MOC');
+            let isFolder = tags.has('#folder') || tags.has('folder');
 
-            if (tags.has('#folder') || tags.has('folder')) {
-                allFolders.push(file);
+            if (isMOC || isFolder) {
+                // Compute child count
+                let childCount = 0;
+
+                if (isMOC) {
+                    let parentOf = [];
+
+                    if (cache?.frontmatter?.parent_of) {
+                        parentOf = cache.frontmatter.parent_of;
+                        if (typeof parentOf === 'string') {
+                            parentOf = [parentOf];
+                        }
+                        childCount = parentOf.length;
+                    }
+                }
+
+                if (isFolder) {
+                    // Get the folder path
+                    const folderPath = file.parent.path;
+                    const folder = app.vault.getAbstractFileByPath(folderPath);
+                    if (folder && folder instanceof TFolder) {
+                        childCount = getFolderChildCount(folder);
+                    }
+                }
+
+                combinedMOCsAndFolders.push({
+                    file,
+                    tag: isFolder ? '#folder' : '#MOC',
+                    childCount,
+                });
             }
         }
+
+        sortCombinedList();
+    }
+
+    function getFolderChildCount(folder: TFolder): number {
+        let count = 0;
+
+        for (const child of folder.children) {
+            if (child instanceof TFile || child instanceof TFolder) {
+                count++;
+            }
+            if (child instanceof TFolder) {
+                count += getFolderChildCount(child);
+            }
+        }
+        return count;
     }
 
     function getAllTags(cache) {
@@ -98,43 +139,39 @@
         if (filterType === 'all') {
             const files = app.vault.getMarkdownFiles();
             loadNotes(files);
-        } else if (filterType === 'MOC' && selectedFilterPath) {
-            const mocNote = app.vault.getAbstractFileByPath(selectedFilterPath) as TFile;
-            if (mocNote) {
-                const children = await getMOCChildren(mocNote);
-                loadNotes(children);
-            } else {
-                console.error('MOC note not found.');
-            }
-        } else if (filterType === 'folder' && selectedFilterPath) {
-            const folderNote = app.vault.getAbstractFileByPath(selectedFilterPath) as TFile;
-            if (folderNote) {
-                // Attempt to get the folder path from frontmatter
-                console.log('Folder note1:', folderNote);
-                const cache = app.metadataCache.getFileCache(folderNote);
-                let folderPath = '';
+        } else if (filterType === 'MOCFolder' && selectedFilterPath) {
+            const selectedFile = app.vault.getAbstractFileByPath(selectedFilterPath) as TFile;
+            const selectedItem = combinedMOCsAndFolders.find(item => item.file.path === selectedFilterPath);
 
-                // console.log('eFolder path3:', folderNote.path);
-                console.log('eFolder parentpath:', folderNote.parent.path);
-                // Fallback: Assume folder has the same name as note's basename
-
-                // folderPath = folderNote.path.replace(/\.md$/, '');
-                folderPath = normalizePath(folderNote.parent.path);
-                // console.log('normalized path:', folderPath);
-
-                const folder = app.vault.getAbstractFileByPath(folderPath);
-                if (folder && folder instanceof TFolder) {
-                    console.log('Folder4:', folder);
-                    const children = await getFolderChildren(folder as TFolder, true);
-                    // Filter out TFolders, we only want TFiles
-                    const files = children.filter(item => item instanceof TFile) as TFile[];
-                    loadNotes(files);
-                } else {
-                    console.error('Folder not found for selected filter.');
+            if (selectedItem) {
+                if (selectedItem.tag === '#MOC') {
+                    const children = await getMOCChildren(selectedFile);
+                    loadNotes(children);
+                } else if (selectedItem.tag === '#folder') {
+                    const folderPath = normalizePath(selectedFile.parent.path);
+                    const folder = app.vault.getAbstractFileByPath(folderPath);
+                    if (folder && folder instanceof TFolder) {
+                        const children = await getFolderChildren(folder as TFolder, true);
+                        // Filter out TFolders, we only want TFiles
+                        const files = children.filter(item => item instanceof TFile) as TFile[];
+                        loadNotes(files);
+                    } else {
+                        console.error('Folder not found for selected filter.');
+                    }
                 }
             } else {
-                console.error('Folder note not found.');
+                console.error('Selected item not found in combined list.');
             }
+        }
+    }
+
+    function sortCombinedList() {
+        if (sortOption === 'name') {
+            combinedMOCsAndFolders.sort((a, b) => a.file.basename.localeCompare(b.file.basename));
+        } else if (sortOption === 'lastUpdated') {
+            combinedMOCsAndFolders.sort((a, b) => b.file.stat.mtime - a.file.stat.mtime);
+        } else if (sortOption === 'childCount') {
+            combinedMOCsAndFolders.sort((a, b) => b.childCount - a.childCount);
         }
     }
 
@@ -188,33 +225,33 @@
         All Notes
     </label>
     <label>
-        <input type="radio" bind:group={filterType} value="MOC" on:change={applyFilter}>
-        Filter by MOC
+        <input type="radio" bind:group={filterType} value="MOCFolder" on:change={applyFilter}>
+        Filter by MOC/Folder
     </label>
-    <label>
-        <input type="radio" bind:group={filterType} value="folder" on:change={applyFilter}>
-        Filter by Folder
-    </label>
+    {#if filterType === 'MOCFolder'}
+        <label>
+            Sort by:
+            <select bind:value={sortOption} on:change={() => { sortCombinedList(); }}>
+                <option value="name">Name</option>
+                <option value="lastUpdated">Last Updated</option>
+                <option value="childCount">Child Count</option>
+            </select>
+        </label>
+    {/if}
 </div>
 
-{#if filterType === 'MOC'}
+{#if filterType === 'MOCFolder'}
     <select bind:value={selectedFilterPath} on:change={applyFilter}>
-        <option value="">Select MOC</option>
-        {#each allMOCs as moc}
-            <option value={moc.path}>{moc.basename}</option>
+        <option value="">Select MOC or Folder</option>
+        {#each combinedMOCsAndFolders as item}
+            <option value={item.file.path}>
+                {item.file.basename} ({item.childCount}) {item.tag === '#folder' ? '[folder]' : ''}
+            </option>
         {/each}
     </select>
 {/if}
 
-{#if filterType === 'folder'}
-    <select bind:value={selectedFilterPath} on:change={applyFilter}>
-        <option value="">Select Folder Note</option>
-        {#each allFolders as folderNote}
-            <option value={folderNote.path}>{folderNote.basename}</option>
-        {/each}
-    </select>
-{/if}
-
+<!-- Existing code for displaying notes -->
 {#if noteStates.length === 0}
     <p>Loading notes...</p>
 {:else}
@@ -222,3 +259,12 @@
         <NoteItem {noteState} {app} />
     {/each}
 {/if}
+<style>
+    /* Style for folder options in the select dropdown */
+    option {
+        color: #333;
+    }
+    option.folder {
+        background-color: #e6f2ff; /* bluish background */
+    }
+</style>

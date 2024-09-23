@@ -10,16 +10,17 @@ export default class Chronos extends Plugin {
 		new Notice("Chronos loaded!");
 		this.writeVaultFilesToStore();
 
-		["create", "modify", "delete", "rename"].forEach((event) => {
-			this.registerEvent(
-				(this.app.vault as any).on(
-					event,
-					this.writeVaultFilesToStore.bind(this)
-				)
-			);
-		});
+		// ["create", "modify", "delete", "rename"].forEach((event) => {
+		// 	this.registerEvent(
+		// 		(this.app.vault as any).on(
+		// 			event,
+		// 			this.writeVaultFilesToStore.bind(this)
+		// 		)
+		// 	);
+		// });
 
 		this.addRibbonIcon("clock", "Chronos", () => {
+			this.writeVaultFilesToStore();
 			this.activateView();
 		});
 	}

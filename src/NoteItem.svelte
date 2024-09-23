@@ -16,14 +16,10 @@
     let editorView: EditorView | null = null;
     let parentNotes: { file: TFile, tag: string }[] = [];
     let parentInputEl: HTMLInputElement;
-    let suggestionList: { file: TFile, count: number, tag: string }[] = [];
+    let suggestionList: { file: TFile, count: number, tag: string, childCount: number }[] = [];
     let showSuggestions = false;
     let query = '';
-
-    // New variables for move functionality
-    let moveTargetInput: HTMLInputElement;
-    let moveTargetPath: string = '';
-    let moveError: string = '';
+    let sortOption = 'name';
 
     $: if (!noteState.isEditing && containerEl) {
         renderNoteContent();
@@ -137,10 +133,11 @@
             const cache = app.metadataCache.getFileCache(file);
             const tags = getAllTags(cache);
 
-            if (tags.has('#MOC') || tags.has('#folder') || tags.has('MOC') || tags.has('folder')) {
-                if (query.length === 0 || file.basename.toLowerCase().includes(query.toLowerCase())) {
-                    filteredFiles.push(file);
-                }
+            let isMOC = tags.has('#MOC') || tags.has('MOC');
+            let isFolder = tags.has('#folder') || tags.has('folder');
+
+            if ((isMOC || isFolder) && (query.length === 0 || file.basename.toLowerCase().includes(query.toLowerCase()))) {
+                filteredFiles.push(file);
             }
         }
 
@@ -164,10 +161,36 @@
             } else if (tags.has('#MOC') || tags.has('MOC')) {
                 tag = '#MOC';
             }
+
+            // Compute child count
+            let childCount = 0;
+
+            if (tag === '#MOC') {
+                let parentOf = [];
+
+                if (cache?.frontmatter?.parent_of) {
+                    parentOf = cache.frontmatter.parent_of;
+                    if (typeof parentOf === 'string') {
+                        parentOf = [parentOf];
+                    }
+                    childCount = parentOf.length;
+                }
+            }
+
+            if (tag === '#folder') {
+                // Get the folder path
+                const folderPath = file.parent.path;
+                const folder = app.vault.getAbstractFileByPath(folderPath);
+                if (folder && folder instanceof TFolder) {
+                    childCount = getFolderChildCount(folder);
+                }
+            }
+
             return {
                 file,
                 count,
-                tag
+                tag,
+                childCount
             };
         });
 
@@ -176,25 +199,33 @@
 
         // Sort suggestions
         suggestionList.sort((a, b) => {
-            // Prioritize based on counts (descending)
-            if (b.count !== a.count) {
-                return b.count - a.count;
+            if (sortOption === 'name') {
+                return a.file.basename.localeCompare(b.file.basename);
+            } else if (sortOption === 'lastUpdated') {
+                return b.file.stat.mtime - a.file.stat.mtime;
+            } else if (sortOption === 'childCount') {
+                return b.childCount - a.childCount;
+            } else {
+                // Default sorting
+                return a.file.basename.localeCompare(b.file.basename);
             }
-            // Then based on tag
-            if (a.tag !== b.tag) {
-                if (a.tag === '#folder') return -1;
-                if (b.tag === '#folder') return 1;
-            }
-            // Then based on query match
-            const aIncludes = a.file.basename.toLowerCase().includes(query.toLowerCase());
-            const bIncludes = b.file.basename.toLowerCase().includes(query.toLowerCase());
-            if (aIncludes && !bIncludes) return -1;
-            if (!aIncludes && bIncludes) return 1;
-            // Then alphabetically
-            return a.file.basename.localeCompare(b.file.basename);
         });
 
         showSuggestions = true;
+    }
+
+    function getFolderChildCount(folder: TFolder): number {
+        let count = 0;
+
+        for (const child of folder.children) {
+            if (child instanceof TFile || child instanceof TFolder) {
+                count++;
+            }
+            if (child instanceof TFolder) {
+                count += getFolderChildCount(child);
+            }
+        }
+        return count;
     }
 
     function getAllTags(cache) {
@@ -408,17 +439,6 @@
         }
     }
 
-    async function moveNote() {
-        moveError = '';
-        const targetNote = app.vault.getAbstractFileByPath(moveTargetPath) as TFile;
-        if (targetNote) {
-            await moveNoteToFolder(noteState.file, targetNote);
-            moveTargetPath = '';
-            renderNoteContent();
-        } else {
-            moveError = 'Target note not found.';
-        }
-    }
 
     onDestroy(() => {
         if (editorView) {
@@ -455,27 +475,40 @@
         {/each}
         <!-- Existing input for adding new parents -->
         <input type="text" bind:this={parentInputEl} bind:value={query} on:input={onInput} on:focus={onFocus} on:blur={onBlur} placeholder="Add parent..." />
+        <label>
+            Sort by:
+            <select bind:value={sortOption} on:change={updateSuggestions}>
+                <option value="name">Name</option>
+                <option value="lastUpdated">Last Updated</option>
+                <option value="childCount">Child Count</option>
+            </select>
+        </label>
         {#if showSuggestions}
-            <div class="suggestions">
-                {#each suggestionList as suggestion}
-                    <div class="suggestion-item {suggestion.tag === '#folder' ? 'folder' : ''}" on:click={() => selectSuggestion(suggestion)}>
-                        <span>
-                            {suggestion.file.basename}
-                            {#if suggestion.count > 0}
-                                {` ${suggestion.count}`}
-                            {/if}
-                            {#if suggestion.tag}
-                                {` ${suggestion.tag}`}
-                            {/if}
-                        </span>
-                    </div>
-                {/each}
-            </div>
+        
+        <!-- Suggestions list -->
+        <div class="suggestions">
+            {#each suggestionList as suggestion}
+                <div class="suggestion-item {suggestion.tag === '#folder' ? 'folder' : ''}" on:click={() => selectSuggestion(suggestion)}>
+                    <span>
+                        {suggestion.file.basename} ({suggestion.childCount})
+                        {#if suggestion.count > 0}
+                            {` ${suggestion.count}`}
+                        {/if}
+                        {#if suggestion.tag}
+                            {` ${suggestion.tag}`}
+                        {/if}
+                    </span>
+                </div>
+            {/each}
+        </div>
         {/if}
     </div>
 </div>
 
     <style>
+        .suggestion-item.folder {
+        background-color: #e6f2ff; /* Slightly blueish background for folders */
+        }
         .move-note-container {
         margin-top: 10px;
         }
