@@ -430,19 +430,19 @@
         {/each}
         <!-- Input for adding new parents -->
         <input type="text" bind:this={parentInputEl} bind:value={query} on:input={onInput} on:focus={onFocus} on:blur={onBlur} placeholder="Add parent..." />
+        <!-- Sorting options -->
+        <div class="sort-options">
+            <label>
+                Sort by:
+                <select bind:value={sortOption} on:change={updateSuggestions}>
+                    <option value="name">Name</option>
+                    <option value="lastUpdated">Last Updated</option>
+                    <option value="childCount">Child Count</option>
+                    <option value="neighborCount">Neighbor Count</option>
+                </select>
+            </label>
+        </div>
         {#if showSuggestions}
-            <!-- Sorting options -->
-            <div class="sort-options">
-                <label>
-                    Sort by:
-                    <select bind:value={sortOption} on:change={updateSuggestions}>
-                        <option value="name">Name</option>
-                        <option value="lastUpdated">Last Updated</option>
-                        <option value="childCount">Child Count</option>
-                        <option value="neighborCount">Neighbor Count</option>
-                    </select>
-                </label>
-            </div>
             <div class="suggestions">
                 {#each suggestionList as suggestion}
                     <div class="suggestion-item {suggestion.tag === '#folder' ? 'folder' : ''}" on:click={() => selectSuggestion(suggestion)}>
