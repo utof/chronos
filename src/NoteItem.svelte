@@ -3,6 +3,14 @@
     import { TFile, TFolder, MarkdownRenderer } from "obsidian";
     import { EditorView, basicSetup } from '@codemirror/basic-setup';
     import { EditorState } from "@codemirror/state";
+    import {
+        getAllTags,
+        getMOCChildCount,
+        getFolderChildCount,
+        updateParentOf,
+        arraysEqual,
+        getBestParentPaths
+    } from "./utils";
 
     export let app;
     export let noteState: {
@@ -14,15 +22,16 @@
 
     let containerEl: HTMLElement;
     let editorView: EditorView | null = null;
-    let parentNotes: ParentNote[] = []; // Updated type
+    let parentNotes: ParentNote[] = [];
     let parentInputEl: HTMLInputElement;
-    let suggestionList: Suggestion[] = []; // Updated type
+    let suggestionList: Suggestion[] = [];
     let showSuggestions = false;
     let query = '';
     let sortOption = 'name';
     let includeMultiMOCs = false;
-    let moveError: string = '';
 
+    // Variables for move functionality
+    let moveError: string = '';
 
     interface ParentNote {
         file?: TFile;          // For single MOC/folder
@@ -39,15 +48,6 @@
         childCount: number;
         neighborCount: number;
     }
-    
-    function arraysEqual(a1: string[], a2: string[]) {
-        if (a1.length !== a2.length) return false;
-        for (let i = 0; i < a1.length; i++) {
-            if (a1[i] !== a2[i]) return false;
-        }
-        return true;
-    }
-
 
     $: if (!noteState.isEditing && containerEl) {
         renderNoteContent();
@@ -67,24 +67,28 @@
             null
         );
     }
-    async function moveNoteToParentFolder(parentEntry) {
+
+    async function moveNoteToParentFolder(parentEntry: ParentNote) {
         const parentFile = parentEntry.file;
-        const targetFolder = parentFile.parent;
-        if (targetFolder) {
-            const newPath = `${targetFolder.path}/${noteState.file.name}`;
-            try {
-                await app.vault.rename(noteState.file, newPath);
-                noteState.file = app.vault.getAbstractFileByPath(newPath) as TFile;
-                noteState.file.path = newPath;
-                await loadParentNotes();
-                renderNoteContent();
-            } catch (error) {
-                moveError = `Failed to move note: ${error.message}`;
+        if (parentFile) {
+            const targetFolder = parentFile.parent;
+            if (targetFolder) {
+                const newPath = `${targetFolder.path}/${noteState.file.name}`;
+                try {
+                    await app.vault.rename(noteState.file, newPath);
+                    noteState.file = app.vault.getAbstractFileByPath(newPath) as TFile;
+                    noteState.file.path = newPath;
+                    await loadParentNotes();
+                    renderNoteContent();
+                } catch (error) {
+                    moveError = `Failed to move note: ${error.message}`;
+                }
+            } else {
+                console.error("Parent note has no parent folder.");
             }
-        } else {
-            console.error("Parent note has no parent folder.");
         }
     }
+
     function editNote() {
         noteState.isEditing = true;
         containerEl.innerHTML = '';
@@ -120,7 +124,7 @@
     }
 
     async function loadParentNotes() {
-
+        parentNotes = [];
 
         const allFiles = app.vault.getMarkdownFiles();
         const thisNoteLink = `[[${noteState.file.basename}]]`;
@@ -169,10 +173,10 @@
         }, 100);
     }
 
-
     async function updateSuggestions() {
         const allFiles = app.vault.getMarkdownFiles();
 
+        // Filter files to only those with #MOC or #folder tags
         const filteredFiles = [];
         for (const file of allFiles) {
             const cache = app.metadataCache.getFileCache(file);
@@ -186,8 +190,10 @@
             }
         }
 
-        const neighborCounts = await getBestParentPaths(noteState.file);
+        // Get neighbor counts
+        const neighborCounts = await getBestParentPaths(app, noteState.file);
 
+        // Build suggestion list with counts and tags
         suggestionList = filteredFiles.map(file => {
             const neighborCountEntry = neighborCounts.get(file.path);
             const neighborCount = neighborCountEntry ? neighborCountEntry[1] : 0;
@@ -201,10 +207,13 @@
                 tag = '#MOC';
             }
 
+            // Compute child count
             let childCount = 0;
+
             if (tag === '#MOC') {
-                childCount = getMOCChildCount(file);
+                childCount = getMOCChildCount(app, file);
             }
+
             if (tag === '#folder') {
                 const folderPath = file.parent.path;
                 const folder = app.vault.getAbstractFileByPath(folderPath);
@@ -222,11 +231,13 @@
             };
         });
 
+        // Include MultiMOCs if enabled
         if (includeMultiMOCs) {
             const multiMOCs = await computeMultiMOCs(noteState.file);
             suggestionList = suggestionList.concat(multiMOCs);
         }
 
+        // Remove already selected parents
         suggestionList = suggestionList.filter(suggestion => {
             if (suggestion.file) {
                 return !parentNotes.some(p => p.file && p.file.path === suggestion.file.path);
@@ -236,6 +247,15 @@
             return true;
         });
 
+        // Remove suggestions with no childCount if it's a MultiMOC
+        suggestionList = suggestionList.filter(suggestion => {
+            if (suggestion.tag === 'multiMOC') {
+                return suggestion.childCount > 0;
+            }
+            return true;
+        });
+
+        // Sort suggestions
         suggestionList.sort((a, b) => {
             if (sortOption === 'name') {
                 return a.name.localeCompare(b.name);
@@ -255,21 +275,24 @@
         showSuggestions = true;
     }
 
-    async function computeMultiMOCs(noteFile) {
+    async function computeMultiMOCs(noteFile: TFile) {
         const mocTag = 'MOC';
         const folderTag = 'folder';
 
-        // Get links and backlinks of the current note
+        // Step 1: Get links and backlinks of the current note
         const links = app.metadataCache.resolvedLinks[noteFile.path] || {};
         const backlinks = app.metadataCache.getBacklinksForFile(noteFile)?.data || {};
 
+        // Combine links and backlinks into a set of neighbor paths
         const neighborPaths = new Set<string>();
         for (let path in links) neighborPaths.add(path);
         for (let path in backlinks) neighborPaths.add(path);
         neighborPaths.delete(noteFile.path);
 
+        // Map from MOC set key to {mocFiles: TFile[], neighborCount: number}
         const multiMOCMap = new Map<string, { mocFiles: TFile[], neighborCount: number }>();
 
+        // For each neighbor, get MOCs connected to it
         for (let neighborPath of neighborPaths) {
             const neighborFile = app.vault.getAbstractFileByPath(neighborPath) as TFile;
             if (neighborFile) {
@@ -282,6 +305,7 @@
                 neighborNeighborPaths.delete(neighborPath);
                 neighborNeighborPaths.delete(noteFile.path);
 
+                // Collect MOCs connected to neighbor
                 const mocsConnected = [];
                 for (let path of neighborNeighborPaths) {
                     const file = app.vault.getAbstractFileByPath(path) as TFile;
@@ -294,6 +318,7 @@
                     }
                 }
 
+                // If more than one MOC connected via this neighbor, create combinations
                 if (mocsConnected.length > 1) {
                     const sortedMocs = mocsConnected.sort((a, b) => a.path.localeCompare(b.path));
                     const key = sortedMocs.map(f => f.path).join('+');
@@ -306,6 +331,7 @@
             }
         }
 
+        // Build suggestion list
         const multiMOCs = [];
         for (let [key, value] of multiMOCMap) {
             const name = value.mocFiles.map(f => f.basename).join(' + ');
@@ -316,7 +342,7 @@
                 let count = 0;
                 const tags = getAllTags(cache);
                 if (tags.has('#MOC') || tags.has('MOC')) {
-                    count = getMOCChildCount(mocFile);
+                    count = getMOCChildCount(app, mocFile);
                 }
                 if (tags.has('#folder') || tags.has('folder')) {
                     const folderPath = mocFile.parent.path;
@@ -341,30 +367,36 @@
 
         return multiMOCs;
     }
-    function getAllTags(cache) {
-        const tags = new Set<string>();
 
-        // Inline tags
-        if (cache?.tags) {
-            for (let tagObj of cache.tags) {
-                tags.add(tagObj.tag);
+    async function selectSuggestion(suggestion: Suggestion) {
+        const { file, mocFiles, tag, name } = suggestion;
+        // Check if already selected
+        if (parentNotes.some(p => {
+            if (file && p.file) {
+                return p.file.path === file.path;
+            } else if (mocFiles && p.mocFiles) {
+                return arraysEqual(p.mocFiles.map(f => f.path), mocFiles.map(f => f.path));
+            }
+            return false;
+        })) {
+            return;
+        }
+
+        // Add to parentNotes
+        parentNotes = [...parentNotes, { file, mocFiles, tag, name }];
+
+        // Update parent_of in frontmatter
+        if (file) {
+            await updateParentOf(app, file, noteState.file);
+        } else if (mocFiles) {
+            for (let mocFile of mocFiles) {
+                await updateParentOf(app, mocFile, noteState.file);
             }
         }
 
-        // Frontmatter tags
-        if (cache?.frontmatter) {
-            const frontmatterTags = cache.frontmatter.tags;
-            if (frontmatterTags) {
-                if (typeof frontmatterTags === 'string') {
-                    tags.add(frontmatterTags);
-                } else if (Array.isArray(frontmatterTags)) {
-                    for (let tag of frontmatterTags) {
-                        tags.add(tag);
-                    }
-                }
-            }
-        }
-        return tags;
+        query = '';
+        showSuggestions = false;
+        parentInputEl.focus();
     }
 
     async function removeParent(parentEntry: ParentNote) {
@@ -417,146 +449,6 @@
         }
     }
 
-    async function selectSuggestion(suggestion: Suggestion) {
-        const { file, mocFiles, tag, name } = suggestion;
-        // Check if already selected
-        if (parentNotes.some(p => {
-            if (file && p.file) {
-                return p.file.path === file.path;
-            } else if (mocFiles && p.mocFiles) {
-                return arraysEqual(p.mocFiles.map(f => f.path), mocFiles.map(f => f.path));
-            }
-            return false;
-        })) {
-            return;
-        }
-
-        // Add to parentNotes
-        parentNotes = [...parentNotes, { file, mocFiles, tag, name }]; // Cast as ParentNote is not necessary
-
-        // Update parent_of in frontmatter
-        if (file) {
-            await updateParentOf(file, noteState.file);
-        } else if (mocFiles) {
-            for (let mocFile of mocFiles) {
-                await updateParentOf(mocFile, noteState.file);
-            }
-        }
-
-        query = '';
-        showSuggestions = false;
-        parentInputEl.focus();
-    }
-
-
-    async function updateParentOf(parentFile: TFile, childFile: TFile) {
-        await app.fileManager.processFrontMatter(parentFile, (frontmatter) => {
-            if (!frontmatter.parent_of) {
-                frontmatter.parent_of = [];
-            }
-
-            const childFileLink = `[[${childFile.basename}]]`;
-            if (!frontmatter.parent_of.includes(childFileLink)) {
-                frontmatter.parent_of.push(childFileLink);
-            }
-        });
-    }
-
-
-
-    async function getBestParentPaths(note: TFile): Promise<Map<string, [TFile, number]>> {
-        const mocTag = 'MOC';
-        const folderTag = 'folder';
-
-        // Step 1: Get links and backlinks of the current note
-        const links = app.metadataCache.resolvedLinks[note.path] || {};
-        const backlinks = app.metadataCache.getBacklinksForFile(note)?.data || {};
-
-        // Combine links and backlinks into a set of neighbor paths
-        const neighborPaths = new Set<string>();
-
-        for (let path in links) {
-            neighborPaths.add(path);
-        }
-        for (let path in backlinks) {
-            neighborPaths.add(path);
-        }
-        // Exclude the current note
-        neighborPaths.delete(note.path);
-
-        // Step 2: For each neighbor, get their links and backlinks
-        const mocCounts: Map<string, [TFile, number]> = new Map();
-
-        for (let neighborPath of neighborPaths) {
-            const neighborFile = app.vault.getAbstractFileByPath(neighborPath) as TFile;
-            if (neighborFile) {
-                const neighborLinks = app.metadataCache.resolvedLinks[neighborPath] || {};
-                const neighborBacklinks = app.metadataCache.getBacklinksForFile(neighborFile)?.data || {};
-
-                // Combine neighbor's links and backlinks
-                const neighborNeighborPaths = new Set<string>();
-
-                for (let path in neighborLinks) {
-                    neighborNeighborPaths.add(path);
-                }
-                for (let path in neighborBacklinks) {
-                    neighborNeighborPaths.add(path);
-                }
-                // Exclude the neighbor and the current note
-                neighborNeighborPaths.delete(neighborPath);
-                neighborNeighborPaths.delete(note.path);
-
-                // Step 3: Check which of these links are MOCs or folders
-                for (let path of neighborNeighborPaths) {
-                    const file = app.vault.getAbstractFileByPath(path) as TFile;
-                    if (file) {
-                        const cache = app.metadataCache.getFileCache(file);
-                        const tags = getAllTags(cache);
-                        if (tags.has(mocTag) || tags.has(folderTag)) {
-                            // Increment the count for this MOC/folder
-                            const existing = mocCounts.get(file.path);
-                            if (existing) {
-                                existing[1] += 1;
-                            } else {
-                                mocCounts.set(file.path, [file, 1]);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        return mocCounts;
-    }
-
-    function getMOCChildCount(mocFile: TFile): number {
-        const cache = app.metadataCache.getFileCache(mocFile);
-        let parentOf = [];
-
-        if (cache?.frontmatter?.parent_of) {
-            parentOf = cache.frontmatter.parent_of;
-            if (typeof parentOf === 'string') {
-                parentOf = [parentOf];
-            }
-            return parentOf.length;
-        }
-        return 0;
-    }
-
-    function getFolderChildCount(folder: TFolder): number {
-        let count = 0;
-
-        for (const child of folder.children) {
-            if (child instanceof TFile || child instanceof TFolder) {
-                count++;
-            }
-            if (child instanceof TFolder) {
-                count += getFolderChildCount(child);
-            }
-        }
-        return count;
-    }
-
     onDestroy(() => {
         if (editorView) {
             editorView.destroy();
@@ -582,10 +474,18 @@
     <div class="parent-input-container">
         {#each parentNotes as parentEntry}
             <div class="parent-note {parentEntry.tag === '#folder' ? 'folder' : ''}">
-                <button on:click={() => moveNoteToParentFolder(parentEntry)} style="font-size: 0.5em; padding: 1px 2px">
-                    M
-                </button>
-                {parentEntry.name}
+                {#if parentEntry.file}
+                    <button on:click={() => moveNoteToParentFolder(parentEntry)} style="font-size: 0.5em; padding: 1px 2px">
+                        M
+                    </button>
+                    {parentEntry.name}
+                {:else if parentEntry.mocFiles}
+                    <!-- For MultiMOCs, disable Move button -->
+                    <button disabled style="font-size: 0.5em; padding: 1px 2px">
+                        M
+                    </button>
+                    {parentEntry.name}
+                {/if}
                 <span class="remove-parent" on:click={() => removeParent(parentEntry)}>×</span>
             </div>
         {/each}
@@ -645,107 +545,112 @@
         <div class="error">{moveError}</div>
     {/if}
 </div>
-    <style>
-        .suggestion-item.folder {
-        background-color: #e6f2ff; /* Slightly blueish background for folders */
-        }
-        .move-note-container {
+
+
+
+
+
+<style>
+    .suggestion-item.folder {
+    background-color: #e6f2ff; /* Slightly blueish background for folders */
+    }
+    .move-note-container {
+    margin-top: 10px;
+    }
+    .move-note-container input {
+        margin-right: 5px;
+        padding: 5px;
+        width: 300px;
+    }
+    .error {
+        color: red;
+    }
+    .note-container {
+        border: 1px solid #ccc;
+        padding: 10px;
+        margin-bottom: 20px;
+    }
+
+    .editor-container {
+        width: 100%;
+        min-height: 100px;
+        max-height: 500px;
+        overflow: auto;
+    }
+
+    .button-group {
         margin-top: 10px;
-        }
-        .move-note-container input {
-            margin-right: 5px;
-            padding: 5px;
-            width: 300px;
-        }
-        .error {
-            color: red;
-        }
-        .note-container {
-            border: 1px solid #ccc;
-            padding: 10px;
-            margin-bottom: 20px;
-        }
-    
-        .editor-container {
-            width: 100%;
-            min-height: 100px;
-            max-height: 500px;
-            overflow: auto;
-        }
-    
-        .button-group {
-            margin-top: 10px;
-        }
-    
-        .parent-notes {
-            display: flex;
-            flex-wrap: wrap;
-            margin-top: 10px;
-        }
-    
-        .parent-note {
-            background-color: #e0e0e0;
-            color: #333;
-            padding: 5px 10px;
-            margin-right: 5px;
-            margin-bottom: 5px;
-            border-radius: 5px;
-            display: flex;
-            align-items: center;
-        }
-    
-        .parent-note.folder {
-            background-color: #e6f2ff; /* Slightly blueish background for folders */
-        }
-    
-        .parent-note .remove-parent {
-            margin-left: 8px;
-            cursor: pointer;
-            font-weight: bold;
-        }
-    
-        .suggestions {
-            position: absolute;
-            background-color: white;
-            border: 1px solid #ccc;
-            max-height: 150px;
-            overflow-y: auto;
-            z-index: 1000;
-            width: calc(100% - 20px);
-            top: 100%;
-            left: 0;
-        }
-    
-        .suggestion-item {
-            padding: 5px 10px;
-            cursor: pointer;
-            display: flex;
-            justify-content: space-between;
-            color: #333;
-        }
-    
-        .suggestion-item:hover {
-            background-color: #f0f0f0;
-        }
-    
-        .suggestion-item.folder {
-            background-color: #e6f2ff; /* Slightly blueish background for folders */
-        }
-    
-        .parent-input-container {
-            position: relative;
-            margin-top: 10px;
-            display: flex;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-    
-        .parent-input-container input {
-            flex: 1;
-            min-width: 150px;
-            margin-top: 5px;
-            padding: 5px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-        }
-    </style>
+    }
+
+    .parent-notes {
+        display: flex;
+        flex-wrap: wrap;
+        margin-top: 10px;
+    }
+
+    .parent-note {
+        background-color: #e0e0e0;
+        color: #333;
+        padding: 5px 10px;
+        margin-right: 5px;
+        margin-bottom: 5px;
+        border-radius: 5px;
+        display: flex;
+        align-items: center;
+    }
+
+    .parent-note.folder {
+        background-color: #e6f2ff; /* Slightly blueish background for folders */
+    }
+
+    .parent-note .remove-parent {
+        margin-left: 8px;
+        cursor: pointer;
+        font-weight: bold;
+    }
+
+    .suggestions {
+        position: absolute;
+        background-color: white;
+        border: 1px solid #ccc;
+        max-height: 150px;
+        overflow-y: auto;
+        /* z-index: 1000; */
+        width: calc(100% - 20px);
+        top: 100%;
+        left: 0;
+    }
+
+    .suggestion-item {
+        padding: 5px 10px;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        color: #333;
+    }
+
+    .suggestion-item:hover {
+        background-color: #f0f0f0;
+    }
+
+    .suggestion-item.folder {
+        background-color: #e6f2ff; /* Slightly blueish background for folders */
+    }
+
+    .parent-input-container {
+        position: relative;
+        margin-top: 10px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+
+    .parent-input-container input {
+        flex: 1;
+        min-width: 150px;
+        margin-top: 5px;
+        padding: 5px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+    }
+</style>

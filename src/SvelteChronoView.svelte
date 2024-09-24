@@ -3,6 +3,11 @@
     import { normalizePath, TFile, TFolder } from "obsidian";
     import { fileStore } from "./stores";
     import NoteItem from "./NoteItem.svelte";
+    import {
+        getAllTags,
+        getMOCChildCount,
+        getFolderChildCount
+    } from "./utils";
 
     export let app; // Obsidian app instance
 
@@ -78,7 +83,7 @@
                 let childCount = 0;
 
                 if (isMOC) {
-                    childCount = getMOCChildCount(file);
+                    childCount = getMOCChildCount(app, file);
                 }
 
                 if (isFolder) {
@@ -98,60 +103,6 @@
         }
 
         sortCombinedList();
-    }
-
-    function getMOCChildCount(mocFile: TFile): number {
-        const cache = app.metadataCache.getFileCache(mocFile);
-        let parentOf = [];
-
-        if (cache?.frontmatter?.parent_of) {
-            parentOf = cache.frontmatter.parent_of;
-            if (typeof parentOf === 'string') {
-                parentOf = [parentOf];
-            }
-            return parentOf.length;
-        }
-        return 0;
-    }
-
-    function getFolderChildCount(folder: TFolder): number {
-        let count = 0;
-
-        for (const child of folder.children) {
-            if (child instanceof TFile || child instanceof TFolder) {
-                count++;
-            }
-            if (child instanceof TFolder) {
-                count += getFolderChildCount(child);
-            }
-        }
-        return count;
-    }
-
-    function getAllTags(cache) {
-        const tags = new Set<string>();
-
-        // Inline tags
-        if (cache?.tags) {
-            for (let tagObj of cache.tags) {
-                tags.add(tagObj.tag);
-            }
-        }
-
-        // Frontmatter tags
-        if (cache?.frontmatter) {
-            const frontmatterTags = cache.frontmatter.tags;
-            if (frontmatterTags) {
-                if (typeof frontmatterTags === 'string') {
-                    tags.add(frontmatterTags);
-                } else if (Array.isArray(frontmatterTags)) {
-                    for (let tag of frontmatterTags) {
-                        tags.add(tag);
-                    }
-                }
-            }
-        }
-        return tags;
     }
 
     async function applyFilter() {
@@ -292,6 +243,7 @@
         <NoteItem {noteState} {app} />
     {/each}
 {/if}
+
 
 <style>
     /* Style for folder options in the select dropdown */
