@@ -1,6 +1,9 @@
 # vscode
 .vscode 
 
+llms
+.clineignore
+
 # Intellij
 *.iml
 .idea
