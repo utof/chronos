@@ -1,11 +1,11 @@
 {
-	"id": "sample-plugin",
-	"name": "Sample Plugin",
-	"version": "1.0.0",
-	"minAppVersion": "0.15.0",
-	"description": "Demonstrates some of the capabilities of the Obsidian API.",
-	"author": "Obsidian",
-	"authorUrl": "https://obsidian.md",
-	"fundingUrl": "https://obsidian.md/pricing",
+	"id": "chronos",
+	"name": "Chronos",
+	"version": "0.0.1",
+	"minAppVersion": "1.8.9",
+	"description": "Displays notes in chronological order of creation.",
+	"author": "utof",
+	"authorUrl": "https://utof.me",
+	"fundingUrl": "https://boosty.to/utof",
 	"isDesktopOnly": false
 }
