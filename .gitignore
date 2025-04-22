@@ -3,6 +3,7 @@
 
 llms
 .clineignore
+.clinerules
 
 # Intellij
 *.iml

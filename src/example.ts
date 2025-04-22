@@ -1,7 +1,7 @@
 import { ItemView, WorkspaceLeaf } from "obsidian";
 
 // Import the Counter Svelte component and the `mount` and `unmount` methods.
-import Counter from "./Counter.svelte";
+import Counter from "./Component.svelte";
 import { mount, unmount } from "svelte";
 
 export const CHRONOS_VIEW_TYPE = "example-view";
@@ -13,6 +13,8 @@ export class ChronosView extends ItemView {
 	constructor(leaf: WorkspaceLeaf) {
 		super(leaf);
 	}
+
+	files = this.app.vault.getMarkdownFiles();
 
 	getViewType() {
 		return CHRONOS_VIEW_TYPE;
@@ -27,7 +29,8 @@ export class ChronosView extends ItemView {
 		this.counter = mount(Counter, {
 			target: this.contentEl,
 			props: {
-				startCount: 5,
+				startCount: 3,
+				files: this.files,
 			},
 		});
 

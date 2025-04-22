@@ -1,4 +1,4 @@
-import { App, Plugin, WorkspaceLeaf } from "obsidian";
+import { Plugin, WorkspaceLeaf } from "obsidian";
 
 // Assuming ChronosView will be in src/example.ts
 import { ChronosView, CHRONOS_VIEW_TYPE } from "./src/example";
@@ -41,10 +41,7 @@ export default class ChronosPlugin extends Plugin {
 		const existingLeaf = this.app.workspace.getMostRecentLeaf();
 
 		if (existingLeaf) {
-			leaf = this.app.workspace.createLeafBySplit(
-				existingLeaf,
-				"horizontal"
-			);
+			leaf = this.app.workspace.getLeaf("tab");
 		} else {
 			leaf = this.app.workspace.getLeaf(true); // Create new leaf if no recent leaf exists
 		}
