@@ -1,9 +1,7 @@
+// main.ts
 import { Plugin, WorkspaceLeaf } from "obsidian";
 
-// Assuming ChronosView will be in src/example.ts
-import { ChronosView, CHRONOS_VIEW_TYPE } from "./src/example";
-
-// Remember to rename these classes and interfaces!
+import { ChronosView, CHRONOS_VIEW_TYPE } from "./src/chronos";
 
 export default class ChronosPlugin extends Plugin {
 	async onload() {
